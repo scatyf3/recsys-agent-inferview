@@ -1,0 +1,53 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/configure-pages@v5
+      # 读者数据（批注、闪卡记录）由页面直接同步到 data 分支（见 src/lib/github.ts）；
+      # 构建前把那边最新的拷过来，打包进站点当初始数据。data 分支还没建时用 main 上的。
+      - name: Use reader data from the data branch
+        run: |
+          if git fetch --depth=1 origin data; then
+            for f in src/data/reader-notes.json src/data/flashcard-progress.json src/data/flashcard-notes.json src/data/flashcard-flags.json; do
+              git show "FETCH_HEAD:$f" > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" || rm -f "$f.tmp"
+            done
+          fi
+      - run: npm ci
+      - run: npm test
+      - run: npm run docs:build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
